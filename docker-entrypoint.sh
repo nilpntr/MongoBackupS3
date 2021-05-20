@@ -1,17 +1,18 @@
 #!/bin/bash
 
-set -euo pipefail
+#set -euo pipefail
 
 : "${DbHostname=""}"
 : "${DbUser=""}"
 : "${DbPassword=""}"
 : "${DbName=""}"
+: "${DbAuthName="admin"}"
 : "${S3AccessKey=""}"
 : "${S3SecretKey=""}"
 : "${S3Bucket=""}"
 
 function waitForDBMS {
-  until mongo --host "$DbHostname" --username "$DbUser" --password "$DbPassword" "$DbName" --eval "print(\"waited for connection\")"
+  until mongo --host "$DbHostname" --username "$DbUser" --password "$DbPassword" "$DbAuthName" --eval "print(\"waited for connection\")"
   do
     sleep 60
   done
@@ -35,6 +36,11 @@ setupEnv() {
       exit 1
   else
       DbPassword="${DB_PASSWORD}"
+  fi
+  if [[ -z "${DB_AUTH_NAME}" ]]; then
+      echo "DB_AUTH_NAME variable not exists, using admin db for authentication"
+  else
+      DbAuthName="${DB_AUTH_NAME}"
   fi
   if [[ -z "${DB_NAME}" ]]; then
       echo "DB_NAME variable not exists"
@@ -73,7 +79,11 @@ backupToFile() {
   TAR="$DEST/../$TIME.tar"
   ENDPOINT="s3://$S3Bucket/"
   mkdir -p "$DEST"
-  mongodump --db "$DbName" --host "$DbHostname" --username "$DbUser" --password "$DbPassword" --gzip -o "$DEST"
+  dbnames=$(echo "$DbName" | tr "," "\n")
+  for i in $dbnames; do
+    echo "Dumping db: $i"
+    mongodump --authenticationDatabase "$DbAuthName" --db "$i" --host "$DbHostname" --username "$DbUser" --password "$DbPassword" --gzip -o "$DEST"
+  done
   tar cvf "$TAR" -C "$DEST" .
   /usr/local/bin/s3cmd/s3cmd put "$TAR" "$ENDPOINT" --access_key "$S3AccessKey" --secret_key "$S3SecretKey"
   rm "$TAR"
